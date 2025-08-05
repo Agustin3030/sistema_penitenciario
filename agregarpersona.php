@@ -14,7 +14,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $required = ['nombre', 'edad', 'causa', 'estado', 'ubicacion', 'tiempo_condena', 'nivel_riesgo'];
     foreach ($required as $field) {
         if (empty($_POST[$field])) {
-            die("El campo $field es obligatorio");
+            $_SESSION['error'] = "El campo $field es obligatorio";
+            header("Location: agregarpersona.php");
+            exit();
         }
     }
 
@@ -31,9 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $stmt = $conexion->prepare("INSERT INTO personas (
         nombre, edad, causa, estado, ubicacion, tiempo_condena, 
-        nivel_riesgo, sanciones, ranchograma
+        nivel_riesgo, sancionado, ranchograma
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
+    $sancionado = isset($_POST['sancionado']) ? 'sancionado' : 'no_sancionado';
+    
     $stmt->bind_param(
         'sisssssss',
         $_POST['nombre'],
@@ -43,17 +47,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_POST['ubicacion'],
         $_POST['tiempo_condena'],
         $_POST['nivel_riesgo'],
-        $_POST['sanciones'],
+        $sancionado,
         json_encode($ranchograma)
     );
 
     if ($stmt->execute()) {
+        // Registrar en el historial
+        $historial_sql = "INSERT INTO historial (usuario_id, accion) VALUES (?, ?)";
+        if ($historial_stmt = $conexion->prepare($historial_sql)) {
+            $accion = "REGISTRO_INTERNO: " . $_POST['nombre'];
+            $historial_stmt->bind_param('is', $_SESSION['id_usuario'], $accion);
+            $historial_stmt->execute();
+            $historial_stmt->close();
+        }
+        
         $_SESSION['exito'] = "Interno agregado correctamente";
         header("Location: agregarpersona.php");
         exit();
     } else {
         $_SESSION['error'] = "Error al agregar: " . $conexion->error;
     }
+    
+    $stmt->close();
+    $conexion->close();
 }
 
 // Obtener lista de internos para ranchograma
@@ -67,12 +83,13 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agregar Interno | Sistema Penitenciario</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         :root {
             --primary: #2c3e50;
             --secondary: #3498db;
             --danger: #e74c3c;
-            --success: #2ecc71;
+            --success: #27ae60;
             --warning: #f39c12;
             --light: #ecf0f1;
             --dark: #34495e;
@@ -86,114 +103,176 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
         
         body {
             font-family: 'Roboto', sans-serif;
-            background-color: #f5f7fa;
+            background-color: #f8f9fa;
             color: #333;
             line-height: 1.6;
         }
         
+        .header {
+            background: var(--primary);
+            color: white;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header h2 {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logout-btn {
+            color: white;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .logout-btn:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+        
         .container {
-            max-width: 1000px;
+            max-width: 1400px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 2rem;
+        }
+        
+        .menu {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 2rem;
+        }
+        
+        .menu a {
+            text-decoration: none;
+            background-color: var(--secondary);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .menu a:hover {
+            background-color: #2980b9;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .menu a i {
+            font-size: 1.1em;
         }
         
         .card {
             background: white;
             border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            padding: 30px;
-            margin-bottom: 30px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+            padding: 1.5rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+            margin-bottom: 2rem;
         }
         
-        h2 {
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
             color: var(--primary);
-            margin-bottom: 25px;
-            font-weight: 700;
-            text-align: center;
-            position: relative;
-            padding-bottom: 15px;
-        }
-        
-        h2::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 100px;
-            height: 3px;
-            background: var(--secondary);
-        }
-        
-        .alert {
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            font-weight: 500;
-        }
-        
-        .alert-success {
-            background-color: rgba(46, 204, 113, 0.2);
-            color: var(--success);
-            border-left: 4px solid var(--success);
-        }
-        
-        .alert-danger {
-            background-color: rgba(231, 76, 60, 0.2);
-            color: var(--danger);
-            border-left: 4px solid var(--danger);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--light);
         }
         
         .form-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 20px;
+            margin-bottom: 1.5rem;
         }
         
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 1.5rem;
         }
         
         label {
             display: block;
-            margin-bottom: 8px;
+            margin-bottom: 0.5rem;
             font-weight: 500;
             color: var(--dark);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         input, select, textarea {
             width: 100%;
-            padding: 12px 15px;
+            padding: 10px 12px;
             border: 1px solid #ddd;
-            border-radius: 5px;
+            border-radius: 6px;
             font-family: 'Roboto', sans-serif;
-            font-size: 16px;
+            font-size: 14px;
             transition: all 0.3s;
         }
         
         input:focus, select:focus, textarea:focus {
-            outline: none;
             border-color: var(--secondary);
+            outline: none;
             box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
         }
         
         textarea {
-            min-height: 100px;
+            min-height: 120px;
             resize: vertical;
+            line-height: 1.5;
+        }
+        
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 1rem;
+        }
+        
+        .checkbox-container input {
+            width: auto;
         }
         
         .relacionados-container {
             border: 1px solid #eee;
-            border-radius: 5px;
-            padding: 20px;
-            margin-top: 10px;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-top: 1rem;
             background-color: #f9f9f9;
         }
         
         .relacionados-title {
             font-weight: 500;
-            margin-bottom: 15px;
+            margin-bottom: 1rem;
             color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .relacion-item {
@@ -213,24 +292,25 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
         }
         
         .btn {
-            display: inline-block;
-            background: var(--secondary);
+            background-color: var(--secondary);
             color: white;
             border: none;
-            padding: 12px 25px;
-            border-radius: 5px;
+            padding: 12px 20px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 16px;
-            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             transition: all 0.3s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             text-decoration: none;
-            text-align: center;
         }
         
         .btn:hover {
-            background: #2980b9;
+            background-color: #2980b9;
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
         }
         
         .btn-block {
@@ -249,12 +329,24 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
             color: white;
         }
         
-        .text-center {
-            text-align: center;
+        .mensaje {
+            padding: 12px 15px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            font-weight: 500;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
-        .mt-4 {
-            margin-top: 40px;
+        .exito {
+            background-color: #d4edda;
+            color: #155724;
+            border-left: 4px solid var(--success);
+        }
+        
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid var(--danger);
         }
         
         .no-internos {
@@ -264,15 +356,26 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
             text-align: center;
         }
         
+        .form-actions {
+            margin-top: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
         @media (max-width: 768px) {
-            .form-grid {
-                grid-template-columns: 1fr;
+            .container {
+                padding: 1rem;
+            }
+            
+            .menu {
+                flex-direction: column;
             }
             
             .relacion-item {
                 flex-direction: column;
                 align-items: flex-start;
-                gap: 8px;
+                gap: 10px;
             }
             
             .relacion-select {
@@ -282,38 +385,52 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
     </style>
 </head>
 <body>
+    <div class="header">
+        <h2><i class="fas fa-user-shield"></i> Bienvenido, <?= htmlspecialchars($_SESSION['nombre'] ?? 'Usuario') ?></h2>
+        <a href="logout.php" class="logout-btn">
+            <i class="fas fa-sign-out-alt"></i> Cerrar sesión
+        </a>
+    </div>
+
     <div class="container">
+        <div class="menu">
+            <a href="listadealojados.php"><i class="fas fa-list"></i> Lista de Alojados</a>
+            <a href="actualizar_estado.php"><i class="fas fa-edit"></i> Actualizar Estados</a>
+            <a href="cargar_nota.php"><i class="fas fa-plus-circle"></i> Registrar Novedad</a>
+            <a href="ver_notas.php"><i class="fas fa-clipboard-list"></i> Ver Novedades</a>
+            <?php if (($_SESSION['rol'] ?? '') === 'admin'): ?>
+                <a href="registrar_usuario.php"><i class="fas fa-user-plus"></i> Registrar Usuario</a>
+                <a href="agregarpersona.php"><i class="fas fa-user-plus"></i> Agregar Interno</a>
+            <?php endif; ?>
+        </div>
+
         <div class="card">
-            <h2>Agregar Nuevo Interno</h2>
+            <h1><i class="fas fa-user-plus"></i> Agregar Nuevo Interno</h1>
             
             <?php if (isset($_SESSION['exito'])): ?>
-                <div class="alert alert-success">
-                    <?= htmlspecialchars($_SESSION['exito']) ?>
-                </div>
+                <div class="mensaje exito"><?= $_SESSION['exito'] ?></div>
                 <?php unset($_SESSION['exito']); ?>
             <?php endif; ?>
             
             <?php if (isset($_SESSION['error'])): ?>
-                <div class="alert alert-danger">
-                    <?= htmlspecialchars($_SESSION['error']) ?>
-                </div>
+                <div class="mensaje error"><?= $_SESSION['error'] ?></div>
                 <?php unset($_SESSION['error']); ?>
             <?php endif; ?>
 
             <form method="POST">
                 <div class="form-grid">
                     <div class="form-group">
-                        <label for="nombre">Nombre Completo</label>
+                        <label for="nombre"><i class="fas fa-id-card"></i> Nombre Completo:</label>
                         <input type="text" id="nombre" name="nombre" required placeholder="Ej: Juan Pérez">
                     </div>
                     
                     <div class="form-group">
-                        <label for="edad">Edad</label>
+                        <label for="edad"><i class="fas fa-calendar-alt"></i> Edad:</label>
                         <input type="number" id="edad" name="edad" min="12" max="100" required placeholder="Ej: 35">
                     </div>
                     
                     <div class="form-group">
-                        <label for="estado">Estado Legal</label>
+                        <label for="estado"><i class="fas fa-gavel"></i> Estado Legal:</label>
                         <select id="estado" name="estado" required>
                             <option value="" disabled selected>Seleccione un estado</option>
                             <option value="condenado">Condenado</option>
@@ -322,21 +439,21 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
                     </div>
                     
                     <div class="form-group">
-                        <label for="ubicacion">Ubicación</label>
+                        <label for="ubicacion"><i class="fas fa-map-marker-alt"></i> Ubicación:</label>
                         <input type="text" id="ubicacion" name="ubicacion" required placeholder="Ej: Pabellón 3 - Celda 12">
                     </div>
                     
                     <div class="form-group">
-                        <label for="tiempo_condena">Tiempo de Condena</label>
+                        <label for="tiempo_condena"><i class="fas fa-clock"></i> Tiempo de Condena:</label>
                         <input type="text" id="tiempo_condena" name="tiempo_condena" required placeholder="Ej: 5 años">
                     </div>
                     
                     <div class="form-group">
-                        <label for="nivel_riesgo">Nivel de Riesgo</label>
+                        <label for="nivel_riesgo"><i class="fas fa-exclamation-triangle"></i> Nivel de Riesgo:</label>
                         <select id="nivel_riesgo" name="nivel_riesgo" required>
                             <option value="" disabled selected>Seleccione nivel</option>
                             <option value="Bajo">Bajo</option>
-                            <option value="Medio" selected>Medio</option>
+                            <option value="Medio">Medio</option>
                             <option value="Alto">Alto</option>
                             <option value="Máximo">Máximo</option>
                         </select>
@@ -344,21 +461,20 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
                 </div>
                 
                 <div class="form-group">
-                    <label for="causa">Causa de Ingreso</label>
+                    <label for="causa"><i class="fas fa-file-alt"></i> Causa de Ingreso:</label>
                     <textarea id="causa" name="causa" required placeholder="Describa los detalles de la causa de ingreso..."></textarea>
                 </div>
                 
-                <div class="form-group">
-                    <label for="sanciones">Sanciones</label>
-                    <textarea id="sanciones" name="sanciones" placeholder="Describa las sanciones aplicadas..."></textarea>
+                <div class="checkbox-container">
+                    <input type="checkbox" id="sancionado" name="sancionado">
+                    <label for="sancionado">¿Actualmente sancionado?</label>
                 </div>
                 
                 <div class="form-group">
-                    <label>Relaciones con otros internos</label>
                     <div class="relacionados-container">
-                        <div class="relacionados-title">Seleccione los internos relacionados</div>
+                        <div class="relacionados-title"><i class="fas fa-users"></i> Relaciones con otros internos</div>
                         
-                        <?php if ($internos->num_rows > 0): ?>
+                        <?php if ($internos && $internos->num_rows > 0): ?>
                             <?php while($interno = $internos->fetch_assoc()): ?>
                                 <div class="relacion-item">
                                     <div>
@@ -380,12 +496,41 @@ $internos = $conexion->query("SELECT id, nombre FROM personas ORDER BY nombre");
                     </div>
                 </div>
                 
-                <div class="form-group text-center mt-4">
-                    <button type="submit" class="btn btn-block">Guardar Interno</button>
-                    <a href="index.php" class="btn btn-outline mt-3">← Volver al inicio</a>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-block">
+                        <i class="fas fa-save"></i> Guardar Interno
+                    </button>
+                    <a href="listadealojados.php" class="btn btn-outline">
+                        <i class="fas fa-arrow-left"></i> Volver a la lista
+                    </a>
                 </div>
             </form>
         </div>
     </div>
+
+    <script>
+        // Efecto de carga suave
+        document.addEventListener('DOMContentLoaded', () => {
+            const card = document.querySelector('.card');
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+            
+            setTimeout(() => {
+                card.style.opacity = '1';
+                card.style.transform = 'translateY(0)';
+            }, 100);
+        });
+    </script>
 </body>
 </html>
+
+<?php 
+// Liberar recursos
+if (isset($internos)) {
+    $internos->free();
+}
+if (isset($conexion)) {
+    $conexion->close();
+}
+?>
